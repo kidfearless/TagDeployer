@@ -1,7 +1,19 @@
-﻿using System.Text.RegularExpressions;
+﻿using System.ServiceProcess;
+using System.Reflection;
+using System.Management;
+using System.Text.RegularExpressions;
 using CliWrap;
 using CliWrap.Buffered;
 using Microsoft.Extensions.Configuration;
+
+var args = args ?? new string[0];
+var installFlag = args.Contains("--install");
+
+if (installFlag)
+{
+	await InstallService(args);
+	return;
+}
 
 var knownTags = new HashSet<string>();
 // get special folder
@@ -22,29 +34,44 @@ var madaiFolder = Path.Join(folder, "MadAI");
 
 var existingTags = (await GetRepoTags(madaiFolder)).ToHashSet();
 
-while (true)
+if (installFlag)
 {
-	try
+	// Run as Windows Service
+	using var service = new TagDeployerService();
+	ServiceBase.Run(service);
+}
+else if (args.Contains("--uninstall"))
+{
+	await UninstallService();
+	return;
+}
+else
+{
+	// Run as console application
+	while (true)
 	{
-		await Cli.Wrap("git")
-		.WithArguments("fetch --tags --prune")
-		.WithWorkingDirectory(madaiFolder)
-		.ExecuteAsync();
-
-		var tags = (await GetRepoTags(madaiFolder)).ToList();
-		var newestTag = tags.First();
-		var contains = existingTags.Contains(newestTag);
-		existingTags = tags.ToHashSet();
-		if (!contains)
+		try
 		{
-			await ExecuteAsync(newestTag);
+			await Cli.Wrap("git")
+			.WithArguments("fetch --tags --prune")
+			.WithWorkingDirectory(madaiFolder)
+			.ExecuteAsync();
+
+			var tags = (await GetRepoTags(madaiFolder)).ToList();
+			var newestTag = tags.First();
+			var contains = existingTags.Contains(newestTag);
+			existingTags = tags.ToHashSet();
+			if (!contains)
+			{
+				await ExecuteAsync(newestTag);
+			}
 		}
-	}
-	catch (Exception ex)
-	{
-		// Log the error and continue the loop
-		await Console.Error.WriteLineAsync($"Error in deployment loop: {ex}");
-		await Task.Delay(TimeSpan.FromMinutes(1));
+		catch (Exception ex)
+		{
+			// Log the error and continue the loop
+			await Console.Error.WriteLineAsync($"Error in deployment loop: {ex}");
+			await Task.Delay(TimeSpan.FromMinutes(1));
+		}
 	}
 }
 
@@ -145,5 +172,86 @@ static async Task KillProcess(string name)
 				.WithArguments($"-f {name}")
 				.WithValidation(CommandResultValidation.None)
 				.ExecuteAsync();
+	}
+public class TagDeployerService : ServiceBase
+{
+	private CancellationTokenSource? _cancellationTokenSource;
+
+	protected override void OnStart(string[] args)
+	{
+		_cancellationTokenSource = new CancellationTokenSource();
+		Task.Run(() => MonitorTags(_cancellationTokenSource.Token));
+	}
+
+	protected override void OnStop()
+	{
+		_cancellationTokenSource?.Cancel();
+	}
+
+	private async Task MonitorTags(CancellationToken cancellationToken)
+	{
+		var specialFolder = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
+		var folder = Path.Join(specialFolder, "MadAI");
+		var madaiFolder = Path.Join(folder, "MadAI");
+		var existingTags = (await GetRepoTags(madaiFolder)).ToHashSet();
+
+		while (!cancellationToken.IsCancellationRequested)
+		{
+			try
+			{
+				await Cli.Wrap("git")
+				.WithArguments("fetch --tags --prune")
+				.WithWorkingDirectory(madaiFolder)
+				.ExecuteAsync();
+
+				var tags = (await GetRepoTags(madaiFolder)).ToList();
+				var newestTag = tags.First();
+				var contains = existingTags.Contains(newestTag);
+				existingTags = tags.ToHashSet();
+				if (!contains)
+				{
+					await ExecuteAsync(newestTag);
+				}
+				await Task.Delay(TimeSpan.FromMinutes(1), cancellationToken);
+			}
+			catch (Exception ex)
+			{
+				EventLog.WriteEntry($"TagDeployer error: {ex.Message}", EventLogEntryType.Error);
+			}
+		}
+	}
+
+	public static async Task InstallService(string[] args)
+	{
+		try
+		{
+			var servicePath = Environment.ProcessPath ?? Assembly.GetExecutingAssembly().Location;
+			using var process = Process.Start("sc", $"create TagDeployer type=own start=auto binPath=\"{servicePath}\" DisplayName=\"MadAI Tag Deployer\"");
+			await process!.WaitForExitAsync();
+			Console.WriteLine("Service 'MadAI Tag Deployer' installed successfully.");
+			Console.WriteLine("Start with: sc start TagDeployer");
+			Console.WriteLine("Stop with: sc stop TagDeployer");
+			Console.WriteLine("Uninstall with: sc delete TagDeployer");
+		}
+		catch (Exception ex)
+		{
+			Console.WriteLine($"Failed to install service: {ex.Message}");
+			Console.WriteLine("Run as Administrator or use local user service account");
+		}
+	}
+
+	public static async Task UninstallService()
+	{
+		try
+		{
+			using var process = Process.Start("sc", "delete TagDeployer");
+			await process!.WaitForExitAsync();
+			Console.WriteLine("Service 'MadAI Tag Deployer' uninstalled successfully.");
+		}
+		catch (Exception ex)
+		{
+			Console.WriteLine($"Failed to uninstall service: {ex.Message}");
+			Console.WriteLine("Run as Administrator");
+		}
 	}
 }

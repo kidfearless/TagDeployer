@@ -7,6 +7,7 @@ Watches Git repositories for new tags and automatically deploys them. Built for 
 - Polls `kidfearless/MadAI` for new Git tags every minute
 - Automatically clones, builds, and deploys new versions
 - Builds: .NET API, React frontend, Chrome extension, then restarts services
+- Runs as console app or Windows Service
 
 ## Dependencies
 
@@ -16,12 +17,14 @@ Watches Git repositories for new tags and automatically deploys them. Built for 
 
 ## Quick Start
 
-```bash
+ ```bash
 cd TagDeployer
 dotnet restore
-dotnet run
-```
-
+dotnet run --install  # Install as Windows Service
+# or
+dotnet run           # Run as console app
+ ```
+ 
 The deployer runs continuously, checking for new tags every 60 seconds.
 
 ## Configuration
