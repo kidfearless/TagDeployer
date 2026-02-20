@@ -11,16 +11,13 @@ using Microsoft.Extensions.Configuration;
 
 var deployPath = "E:\\Deployments";
 Directory.CreateDirectory(deployPath);
+var caddyFile = "E:\\Deployments\\CaddyFile";
 
 var cmdArgs = Environment.GetCommandLineArgs().Skip(1).ToArray();
 if (cmdArgs.Contains("--install"))
 {
 	await InstallService();
-	return;
-}
-else if (cmdArgs.Contains("--uninstall"))
-{
-	await UninstallService();
+	Console.WriteLine("✅ TagDeployer service installed and started");
 	return;
 }
 
@@ -43,7 +40,7 @@ while (true)
 		var tags = (await GetRepoTags(madaiFolder)).ToList();
 		var newestTag = tags.First();
 		var contains = existingTags.Contains(newestTag);
-		existingTags = tags.ToHashSet();
+		existingTags = [.. tags];
 		if (!contains)
 		{
 			await ExecuteAsync(newestTag);
@@ -51,7 +48,7 @@ while (true)
 	}
 	catch (Exception ex)
 	{
-		await Console.Error.WriteLineAsync($"Error in deployment loop: {ex.Message}");
+		await Console.Error.WriteLineAsync($"Error in deployment loop: {ex}");
 	}
 	await Task.Delay(TimeSpan.FromMinutes(1));
 }
@@ -130,52 +127,15 @@ static async Task KillProcess(string name)
 
 static async Task InstallService()
 {
-	Console.WriteLine("Installing TagDeployer Windows Service...");
-
 	var exePath = Environment.ProcessPath ?? Environment.GetCommandLineArgs()[0];
-	var args = $"create TagDeployer start=auto binPath=\"{exePath}\" DisplayName=\"MadAI Tag Deployer\"";
 
-	try
-	{
-		using var process = Process.Start("sc", args);
-		if (process != null)
-		{
-			await process.WaitForExitAsync();
-		}
-		Console.WriteLine("✅ TagDeployer service installed");
-		Console.WriteLine("Start: sc start TagDeployer");
-		Console.WriteLine("Stop: sc stop TagDeployer");
-	}
-	catch (Exception ex)
-	{
-		Console.WriteLine($"❌ Service install failed: {ex.Message}");
-		Console.WriteLine("Ensure running as Administrator");
-	}
-}
+	// Create service
+	await Cli.Wrap("sc")
+		.WithArguments($"create TagDeployer start=auto binPath=\"{exePath}\" DisplayName=\"MadAI Tag Deployer\"")
+		.ExecuteAsync();
 
-static async Task UninstallService()
-{
-	Console.WriteLine("Uninstalling TagDeployer Windows Service...");
-
-	try
-	{
-		using var stopProcess = Process.Start("sc", "stop TagDeployer");
-		if (stopProcess != null)
-		{
-			await stopProcess.WaitForExitAsync();
-			await Task.Delay(2000);
-		}
-
-		using var deleteProcess = Process.Start("sc", "delete TagDeployer");
-		if (deleteProcess != null)
-		{
-			await deleteProcess.WaitForExitAsync();
-		}
-
-		Console.WriteLine("✅ TagDeployer service uninstalled");
-	}
-	catch (Exception ex)
-	{
-		Console.WriteLine($"❌ Service uninstall failed: {ex.Message}");
-	}
+	// Start service automatically
+	await Cli.Wrap("sc")
+		.WithArguments("start TagDeployer")
+		.ExecuteAsync();
 }
