@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Reflection;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using CliWrap;
@@ -10,7 +11,6 @@ using CliWrap.Buffered;
 using Microsoft.Extensions.Configuration;
 
 var deployPath = "E:\\Deployments";
-Directory.CreateDirectory(deployPath);
 var caddyFile = "E:\\Deployments\\CaddyFile";
 
 var cmdArgs = Environment.GetCommandLineArgs().Skip(1).ToArray();
@@ -88,8 +88,12 @@ async Task ExecuteAsync(GitTag tag)
 	await Cli.Wrap("npm").WithArguments("install").WithWorkingDirectory(extensionPath).ExecuteAsync();
 	await Cli.Wrap("npm").WithArguments("run build:zip").WithWorkingDirectory(extensionPath).ExecuteAsync();
 
+	// Copy Caddyfile to deployment folder
+	var destCaddyfile = Path.Combine(tagPath, "Caddyfile");
+	File.Copy(caddyFile, destCaddyfile, true);
+
 	await KillProcess("caddy");
-	_ = Cli.Wrap("caddy").WithArguments("run --config Caddyfile").ExecuteAsync();
+	_ = Cli.Wrap("caddy").WithArguments($"run --config \"{destCaddyfile}\"").WithWorkingDirectory(tagPath).ExecuteAsync();
 }
 
 static async Task<HashSet<GitTag>> GetRepoTags(string madaiFolder)
