@@ -21,6 +21,24 @@ if (cmdArgs.Contains("--install"))
 	return;
 }
 
+var deployIndex = Array.IndexOf(cmdArgs, "--deploy");
+if (deployIndex >= 0)
+{
+	var targetTagName = cmdArgs[deployIndex + 1];
+
+	var specialFolderDeploy = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
+	var folderDeploy = Path.Join(specialFolderDeploy, "MadAI");
+	Directory.CreateDirectory(folderDeploy);
+	var _cloneDeploy = await Cli.Wrap("gh").WithArguments("repo clone kidfearless/MadAI").WithWorkingDirectory(folderDeploy).WithValidation(CommandResultValidation.None).ExecuteBufferedAsync();
+	var madaiFolderDeploy = Path.Join(folderDeploy, "MadAI");
+
+	var allTags = await GetRepoTags(madaiFolderDeploy);
+	var targetTag = allTags.FirstOrDefault(t => t.Tag == targetTagName);
+
+	await ExecuteAsync(targetTag);
+	return;
+}
+
 
 var knownTags = new HashSet<string>();
 var specialFolder = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
